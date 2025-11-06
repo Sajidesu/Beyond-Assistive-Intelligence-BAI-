@@ -11,8 +11,7 @@ class ChatResponse(BaseModel):
 
 app = FastAPI()
 
-@app.post("/chat")
-
+@app.get("/")
 def read_root():
     return {"Hello": "World"} 
 
