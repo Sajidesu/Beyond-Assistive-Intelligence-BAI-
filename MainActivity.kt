@@ -1,5 +1,5 @@
 package com.example.helloworld
-
+// Ayaw ipang wala ang comments kay ako ning guide </333
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -19,28 +19,57 @@ import com.example.helloworld.network.ChatRequest
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.io.IOException
+// --- TASK 4: Import your AssistantActions class ---
+import com.example.helloworld.actions.AssistantActions
 // -------------------------------------
 
 // The main entry point for the Activity
 class MainActivity : ComponentActivity() {
+
+    // --- TASK 4: Create a variable for your AssistantActions ---
+    private lateinit var actions: AssistantActions
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // --- TASK 4: Initialize AssistantActions with the context ---
+        actions = AssistantActions(applicationContext)
+
         setContent {
             HelloWorldTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ChatUI()
+                    // --- TASK 4: Pass the action functions down to the UI ---
+                    ChatUI(
+                        onTestAlarm = {
+                            // Define what the "Test Alarm" button will do
+                            actions.setAlarm("09:30", "Test Alarm")
+                        },
+                        onTestSpeak = {
+                            // Define what the "Test Speak" button will do
+                            actions.speak("Hello, this is a test.")
+                        }
+                    )
                 }
             }
         }
+    }
+    // --- TASK 4: Add onDestroy to clean up the TextToSpeech engine ---
+    override fun onDestroy() {
+        super.onDestroy()
+        actions.shutdown()
     }
 }
 
 // Our main composable function for the UI layout
 @Composable
-fun ChatUI() {
+fun ChatUI(
+    // --- TASK 4: Add parameters to receive the functions ---
+    onTestAlarm: () -> Unit,
+    onTestSpeak: () -> Unit
+) {
     // Allows us to launch network tasks asynchronously
     val coroutineScope = rememberCoroutineScope()
 
@@ -145,6 +174,22 @@ fun ChatUI() {
             }
         }
 
+        // --- TASK 4: Add temporary test buttons ---
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Button(onClick = onTestAlarm) {
+                Text("Test Alarm")
+            }
+            Button(onClick = onTestSpeak) {
+                Text("Test Speak")
+            }
+        }
+        // --- End of TASK 4 buttons ---
+
         Spacer(modifier = Modifier.height(24.dp))
 
         // --- 4. SERVER REPLY TEXT AREA ---
@@ -175,6 +220,7 @@ fun ChatUI() {
 @Composable
 fun ChatUIPreview() {
     HelloWorldTheme {
-        ChatUI()
+        // --- Add test button parameters here ---
+        ChatUI(onTestAlarm = {}, onTestSpeak = {})
     }
 }
