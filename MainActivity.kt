@@ -49,7 +49,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onTestSpeak = {
                             // Define what the "Test Speak" button will do
-                            actions.speak("Hello, this is a test.")
+                            actions.speak("Hello, Serge loves Jhon and He is a Homosexual, our Homosexual friend.")
                         }
                     )
                 }
