@@ -1,0 +1,222 @@
+package com.example.voice // Make sure this matches your package name
+
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.example.voice.ui.theme.VoiceTheme // Your app's theme
+import java.util.*
+
+
+class MainActivity : ComponentActivity() {
+
+    // Task 2: TextToSpeech engine
+    private var textToSpeech: TextToSpeech? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        // Initialize the TextToSpeech engine
+        textToSpeech = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                // Set language, check for support
+                val result = textToSpeech?.setLanguage(Locale.getDefault())
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    Toast.makeText(this, "Language not supported by TTS", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(this, "TTS Initialization failed", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        setContent {
+            VoiceTheme {
+                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    VoiceApp(
+                        modifier = Modifier.padding(innerPadding),
+                        // Pass the speak function to our composable
+                        onSpeak = { text ->
+                            speak(text)
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Task 2: Simple function that says a string out loud.
+     */
+    private fun speak(text: String) {
+        if (text.isNotBlank()) {
+            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+        }
+    }
+
+    override fun onDestroy() {
+        // Shutdown TTS engine to free up resources
+        textToSpeech?.stop()
+        textToSpeech?.shutdown()
+        super.onDestroy()
+    }
+}
+
+@Composable
+fun VoiceApp(
+    modifier: Modifier = Modifier,
+    onSpeak: (String) -> Unit
+) {
+    val context = LocalContext.current
+    var message by remember { mutableStateOf("") }
+    var isListening by remember { mutableStateOf(false) }
+
+    // Helper function to start speech recognition
+    fun startSpeechRecognition(launcher: ActivityResultLauncher<Intent>) {
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            Toast.makeText(context, "Speech recognition not available", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak now...")
+        }
+        launcher.launch(intent)
+    }
+
+    // --- Task 1: SpeechRecognizer Launchers ---
+
+    // Launcher for getting the speech-to-text result
+    val speechRecognitionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        isListening = false
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.get(0) ?: ""
+            message = spokenText // Put the spoken text into the message box
+        } else {
+            Toast.makeText(context, "Speech recognition failed", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Launcher for requesting the RECORD_AUDIO permission
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            isListening = true
+            startSpeechRecognition(speechRecognitionLauncher)
+        } else {
+            Toast.makeText(context, "Microphone permission denied", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // --- UI Layout ---
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "Voice Control",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(bottom = 32.dp)
+        )
+
+        // The "Message" box
+        OutlinedTextField(
+            value = message,
+            onValueChange = { message = it },
+            label = { Text("Message") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            singleLine = false,
+            maxLines = 5
+        )
+
+        // Task 1: Microphone Button
+        Button(
+            onClick = {
+                // Check for permission and start listening
+                when {
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED -> {
+                        isListening = true
+                        startSpeechRecognition(speechRecognitionLauncher)
+                    }
+                    else -> {
+                        // Request the permission
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            // Change color while listening
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Mic,
+                contentDescription = "Microphone Icon",
+                modifier = Modifier.padding(end = 8.dp)
+            )
+            Text(text = if (isListening) "Listening..." else "Tap to Speak")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Task 2: Speak Button
+        Button(
+            onClick = {
+                if (message.isNotBlank()) {
+                    onSpeak(message)
+                } else {
+                    Toast.makeText(context, "Message box is empty", Toast.LENGTH_SHORT).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Speak Message")
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun VoiceAppPreview() {
+    VoiceTheme {
+        VoiceApp(onSpeak = {})
+    }
+}
