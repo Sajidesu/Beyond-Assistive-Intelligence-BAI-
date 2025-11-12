@@ -20,7 +20,6 @@ import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.io.IOException
 
-
 // --- MERGE: Imports from Teammate's file (Task 1 & 2) ---
 import android.Manifest
 import android.app.Activity
@@ -78,9 +77,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // --- OMITTED: Removed onTestAlarm from the ChatUI call ---
                     ChatUI(
-                        // --- MERGE: Pass the REAL speak function (Task 2) ---
                         onSpeak = { text ->
                             speak(text)
                         }
@@ -115,8 +112,6 @@ class MainActivity : ComponentActivity() {
 // Our main composable function for the UI layout
 @Composable
 fun ChatUI(
-    // --- OMITTED: Removed onTestAlarm parameter ---
-    // --- MERGE: Add parameter for Task 2 speak function ---
     onSpeak: (String) -> Unit
 ) {
     // Allows us to launch network tasks asynchronously
@@ -130,10 +125,9 @@ fun ChatUI(
     }
     val gson = remember { Gson() }
 
-
     // Helper function to load the list from memory
     fun loadSavedContexts(): MutableList<String> {
-        val json = prefs.getString(CONTEXT_LIST_KEY, null) // This line will work now
+        val json = prefs.getString(CONTEXT_LIST_KEY, null)
         return if (json == null) {
             mutableListOf()
         } else {
@@ -144,18 +138,17 @@ fun ChatUI(
     // --- END OF LIST LOGIC ---
 
 
-    // --- LIST LOGIC: contextText is now for *new* facts, so it starts empty.
-    var contextText by remember { mutableStateOf("") }
+    // --- CHAT LOGIC: This is now your one and only input field ---
+    var inputText by remember { mutableStateOf("") }
 
-    // State to hold the content of the Message TextField
-    var messageText by remember { mutableStateOf("") }
+    // --- CHAT LOGIC: 'messageText' variable is GONE ---
+
     // State to hold the response from the server/model
     var responseText by remember { mutableStateOf("Server reply will appear here.") }
     // State to handle the loading state
     var isLoading by remember { mutableStateOf(false) }
 
     // --- MERGE: Task 1 (SpeechRecognizer) Logic from VoiceApp ---
-    // val context = LocalContext.current // <-- Already defined above
     var isListening by remember { mutableStateOf(false) }
 
     // Helper function to start speech recognition
@@ -173,7 +166,6 @@ fun ChatUI(
         launcher.launch(intent)
     }
 
-    // ... (Speech recognition launchers remain the same) ...
     val speechRecognitionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -181,7 +173,8 @@ fun ChatUI(
         if (result.resultCode == Activity.RESULT_OK) {
             val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 ?.get(0) ?: ""
-            messageText = spokenText
+            // --- CHAT LOGIC: Put spoken text into the main input box ---
+            inputText = spokenText
         } else {
             Toast.makeText(context, "Speech recognition failed", Toast.LENGTH_SHORT).show()
         }
@@ -205,77 +198,41 @@ fun ChatUI(
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- 1. CONTEXT TEXT FIELD (Your UI) ---
+        // --- CHAT LOGIC: This is now your main text field ---
         OutlinedTextField(
-            value = contextText,
+            value = inputText,
             onValueChange = { newText ->
-                contextText = newText
+                inputText = newText
             },
-            label = { Text("Add to Context") }, // <-- LIST LOGIC: Renamed label
-            placeholder = { Text("e.g., Serge's anniversary is Oct 12") },
+            label = { Text("Type your message...") },
+            placeholder = { Text("e.g., What is 34324325 / 412421?") },
             enabled = !isLoading, // Disable while loading
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 8.dp)
         )
 
-        // --- LIST LOGIC: Updated buttons ---
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        // --- CHAT LOGIC: "Save" button is gone. "View Saved" is now by itself ---
+        Button(
+            onClick = {
+                val savedList = loadSavedContexts()
+                if (savedList.isEmpty()) {
+                    Toast.makeText(context, "No saved messages.", Toast.LENGTH_SHORT).show()
+                } else {
+                    val intent = Intent(context, SavedContextsActivity::class.java).apply {
+                        putStringArrayListExtra("CONTEXT_LIST", ArrayList(savedList))
+                    }
+                    context.startActivity(intent)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Button(
-                onClick = {
-                    // --- LIST LOGIC: Save to list ---
-                    if (contextText.isNotBlank()) {
-                        val savedList = loadSavedContexts()
-                        savedList.add(contextText) // Add the new fact
-                        val json = gson.toJson(savedList) // Convert list to JSON
-                        prefs.edit().putString(CONTEXT_LIST_KEY, json).apply() // Save it
-                        Toast.makeText(context, "Context Saved!", Toast.LENGTH_SHORT).show()
-                        contextText = "" // Clear the text field for the next fact
-                    } else {
-                        Toast.makeText(context, "Context box is empty", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Save Context")
-            }
-
-            Button(
-                onClick = {
-                    // --- LIST LOGIC: Launch new activity ---
-                    val savedList = loadSavedContexts()
-                    if (savedList.isEmpty()) {
-                        Toast.makeText(context, "No saved contexts.", Toast.LENGTH_SHORT).show()
-                    } else {
-                        // Launch the new SavedContextsActivity
-                        val intent = Intent(context, SavedContextsActivity::class.java).apply {
-                            putStringArrayListExtra("CONTEXT_LIST", ArrayList(savedList))
-                        }
-                        context.startActivity(intent)
-                    }
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("View Saved")
-            }
+            Text("View Saved Messages")
         }
-        // --- END OF LIST LOGIC ---
+        // --- END OF CHAT LOGIC ---
 
 
-        // --- 2. MESSAGE TEXT FIELD (Your UI) ---
-        OutlinedTextField(
-            value = messageText,
-            onValueChange = { messageText = it },
-            label = { Text("Message (User Query)") },
-            placeholder = { Text("e.g., What are the capital cities of Europe?") },
-            enabled = !isLoading, // Disable while loading
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp)
-        )
+        // --- CHAT LOGIC: "Message" text field is GONE ---
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -283,25 +240,50 @@ fun ChatUI(
         Button(
             onClick = {
                 if (isLoading) return@Button
+                if (inputText.isBlank()) {
+                    Toast.makeText(context, "Message is empty", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+
                 isLoading = true
                 responseText = "Sending request..."
+
+                // --- CHAT LOGIC: New "Send" logic ---
+                // 1. Load the current chat history
+                val chatHistory = loadSavedContexts()
+
+                // 2. Add the user's new message to the history
+                val userMessage = "User: $inputText"
+                chatHistory.add(userMessage)
+
+                // 3. Save the *updated* history
+                val json = gson.toJson(chatHistory)
+                prefs.edit().putString(CONTEXT_LIST_KEY, json).apply()
+
+                // 4. Clear the input box
+                val currentInput = inputText // Save current input for the request
+                inputText = ""
+                // --- END OF NEW "Send" LOGIC ---
+
                 coroutineScope.launch {
                     try {
-                        if (messageText.isBlank()) {
-                            responseText = "Error: Message cannot be empty."
-                            return@launch
-                        }
+                        // --- CHAT LOGIC: Send the full history as context,
+                        // and the current message as the "message"
+                        val fullContext = chatHistory.joinToString("\n")
+                        val request = ChatRequest(message = currentInput, context = fullContext)
 
-                        // --- LIST LOGIC: Load the full context list for the AI ---
-                        val fullContext = loadSavedContexts().joinToString("\n")
-
-                        // Pass the full saved list as the context
-                        val request = ChatRequest(message = messageText, context = fullContext)
                         val response = ChatApi.service.chat(request)
-                        // ... (Rest of your networking code is the same) ...
 
+                        // --- CHAT LOGIC: Save the AI's response to history ---
+                        val aiResponse = "AI: ${response.content}"
+                        chatHistory.add(aiResponse)
+                        val newJson = gson.toJson(chatHistory)
+                        prefs.edit().putString(CONTEXT_LIST_KEY, newJson).apply()
+
+                        // Show the AI response in the reply box
                         responseText = response.content
                         Log.d("ChatApp", "API Success: ${response.content}")
+
                     } catch (e: IOException) {
                         responseText = "Error: Could not connect to server. Check IP and Wi-Fi."
                         Log.e("ChatApp", "Network Error (IOException): ${e.message}")
@@ -329,10 +311,7 @@ fun ChatUI(
             }
         }
 
-        // ... (Rest of the file is the same) ...
-
         // --- OMITTED: Removed the "Test Alarm" button row ---
-        // --- End of TASK 4 buttons ---
 
         // --- MERGE: Added Teammate's UI (Task 1 & 2 Buttons) ---
 
@@ -372,10 +351,11 @@ fun ChatUI(
         // Task 2: Speak Button
         Button(
             onClick = {
-                if (messageText.isNotBlank()) {
-                    onSpeak(messageText)
+                // --- CHAT LOGIC: Speak the text from the main input box ---
+                if (inputText.isNotBlank()) {
+                    onSpeak(inputText)
                 } else {
-                    Toast.makeText(context, "Message box is empty", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Text box is empty", Toast.LENGTH_SHORT).show()
                 }
             },
             modifier = Modifier.fillMaxWidth()
@@ -413,7 +393,6 @@ fun ChatUI(
 @Composable
 fun ChatUIPreview() {
     HelloWorldTheme {
-        // --- OMITTED: Removed onTestAlarm from preview ---
         ChatUI(
             onSpeak = {}
         )
