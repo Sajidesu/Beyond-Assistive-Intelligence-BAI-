@@ -6,30 +6,47 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
 
-// IMPORTANT: Replace with the actual IP address of your FastAPI server
-private const val BASE_URL = "http://10.67.137.254:8000/"
+// IMPORTANT: Make sure this is still your server IP
+private const val BASE_URL = "http://10.125.149.254:8000/"
 
-// 1. Data structure sent to the server (Matches FastAPI's ChatRequest)
-data class ChatRequest(
-    val message: String,
-    val context: String
+// --- NEW DATA MODELS TO MATCH PYTHON BACKEND ---
+
+// 1. A single message in the chat history
+data class HistoryMessage(
+    @SerializedName("role")
+    val role: String, // "user" or "model"
+    @SerializedName("text")
+    val text: String
 )
 
-// 2. Data structure received from the server (Matches FastAPI's ChatResponse)
+// 2. The new ChatRequest your app will SEND
+data class ChatRequest(
+    @SerializedName("permanent_context")
+    val permanentContext: String,
+    @SerializedName("chat_history")
+    val chatHistory: List<HistoryMessage>
+)
+
+// 3. The new ChatResponse your app will RECEIVE
+// All fields are optional (nullable) except "type"
 data class ChatResponse(
-    @SerializedName("type") // Use SerializedName for clarity
+    @SerializedName("type")
     val type: String,
     @SerializedName("content")
-    val content: String
+    val content: String?,
+    @SerializedName("time")
+    val time: String?,
+    @SerializedName("label")
+    val label: String?
 )
 
-// 3. The Retrofit Interface
+// 4. The Retrofit Interface (remains the same)
 interface ChatService {
     @POST("chat") // The endpoint defined in FastAPI
-    suspend fun chat(@Body request: ChatRequest): ChatResponse
+    suspend fun chat(@Body request: ChatRequest): ChatResponse // Updated request/response
 }
 
-// 4. Singleton object to provide access to the API service
+// 5. Singleton object (remains the same)
 object ChatApi {
     private val retrofit = Retrofit.Builder()
         .baseUrl(BASE_URL)
