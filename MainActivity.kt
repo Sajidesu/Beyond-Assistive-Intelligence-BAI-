@@ -15,10 +15,15 @@ import androidx.compose.ui.unit.sp
 import com.example.helloworld.ui.theme.HelloWorldTheme
 // --- REQUIRED IMPORTS FOR NETWORKING ---
 import com.example.helloworld.network.ChatApi
+// --- BACKEND SYNC: Import new data classes ---
 import com.example.helloworld.network.ChatRequest
+import com.example.helloworld.network.HistoryMessage
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.io.IOException
+
+// --- BACKEND SYNC: We MUST re-import AssistantActions to handle the "alarm" tool ---
+import com.example.helloworld.actions.AssistantActions
 
 // --- MERGE: Imports from Teammate's file (Task 1 & 2) ---
 import android.Manifest
@@ -55,8 +60,14 @@ class MainActivity : ComponentActivity() {
     // --- MERGE: Task 2 (TextToSpeech engine) ---
     private var textToSpeech: TextToSpeech? = null
 
+    // --- BACKEND SYNC: We need this again ---
+    private lateinit var actions: AssistantActions
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // --- BACKEND SYNC: We need to initialize this again ---
+        actions = AssistantActions(applicationContext)
 
         // --- MERGE: Task 2 (TextToSpeech) Initialization ---
         textToSpeech = TextToSpeech(this) { status ->
@@ -82,6 +93,10 @@ class MainActivity : ComponentActivity() {
                     ChatUI(
                         onSpeak = { text ->
                             speak(text)
+                        },
+                        // --- BACKEND SYNC: Pass the actions down ---
+                        onSetAlarm = { time, label ->
+                            actions.setAlarm(time, label)
                         }
                     )
                 }
@@ -114,7 +129,9 @@ class MainActivity : ComponentActivity() {
 // Our main composable function for the UI layout
 @Composable
 fun ChatUI(
-    onSpeak: (String) -> Unit
+    onSpeak: (String) -> Unit,
+    // --- BACKEND SYNC: A function to call the alarm tool ---
+    onSetAlarm: (String, String) -> Unit
 ) {
     // Allows us to launch network tasks asynchronously
     val coroutineScope = rememberCoroutineScope()
@@ -147,6 +164,19 @@ fun ChatUI(
             val type = object : TypeToken<MutableList<String>>() {}.type
             gson.fromJson(json, type)
         }
+    }
+
+    // --- BACKEND SYNC: Helper function to SAVE chat history ---
+    // We'll be calling this a lot
+    fun saveChatHistory(history: List<String>) {
+        val json = gson.toJson(history)
+        prefs.edit().putString(CHAT_HISTORY_KEY, json).apply()
+    }
+
+    // --- BACKEND SYNC: Helper function to SAVE permanent context ---
+    fun savePermanentContexts(contexts: List<String>) {
+        val json = gson.toJson(contexts)
+        prefs.edit().putString(PERMANENT_CONTEXT_KEY, json).apply()
     }
     // --- END OF NEW PLAN ---
 
@@ -213,16 +243,20 @@ fun ChatUI(
                 inputText = newText
             },
             label = { Text("Type your message...") },
-            placeholder = { Text("e.g., What is 34324325 / 412421?") },
+            // --- BACKEND SYNC: New placeholder to encourage saving facts ---
+            placeholder = { Text("e.g., 'Remember my anniversary is Oct 12'") },
             enabled = !isLoading, // Disable while loading
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 8.dp)
         )
 
+        // --- BACKEND SYNC: Removed the "Save as Fact" button.
+        // The AI will handle this automatically now.
+
         // --- NEW PLAN: Button Row for memory management ---
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // --- 1. View Contexts (Permanent, Editable) ---
@@ -233,7 +267,6 @@ fun ChatUI(
                         Toast.makeText(context, "No saved contexts.", Toast.LENGTH_SHORT).show()
                     } else {
                         val intent = Intent(context, SavedContextsActivity::class.java).apply {
-                            // We pass the permanent list to the editable screen
                             putStringArrayListExtra("CONTEXT_LIST", ArrayList(savedList))
                         }
                         context.startActivity(intent)
@@ -241,7 +274,7 @@ fun ChatUI(
                 },
                 modifier = Modifier.weight(1f)
             ) {
-                Text("View Contexts")
+                Text("View Contexts") // Renamed for clarity
             }
 
             // --- 2. Chat History (Temporary, Read-only) ---
@@ -252,7 +285,6 @@ fun ChatUI(
                         Toast.makeText(context, "No chat history.", Toast.LENGTH_SHORT).show()
                     } else {
                         val intent = Intent(context, ChatHistoryActivity::class.java).apply {
-                            // We pass the chat history list to the read-only screen
                             putStringArrayListExtra("CHAT_HISTORY_LIST", ArrayList(savedList))
                         }
                         context.startActivity(intent)
@@ -293,8 +325,9 @@ fun ChatUI(
                 isLoading = true
                 responseText = "Sending request..."
 
-                // --- NEW PLAN: Updated Send Logic ---
-                // 1. Load BOTH memory lists
+                // --- BACKEND SYNC: Completely new "Send" logic ---
+
+                // 1. Load both memory lists
                 val permanentContexts = loadPermanentContexts()
                 val chatHistory = loadChatHistory()
 
@@ -303,35 +336,65 @@ fun ChatUI(
                 chatHistory.add(userMessage)
 
                 // 3. Save the *updated* chat history
-                val chatJson = gson.toJson(chatHistory)
-                prefs.edit().putString(CHAT_HISTORY_KEY, chatJson).apply()
+                saveChatHistory(chatHistory)
 
                 // 4. Clear the input box
-                val currentInput = inputText // Save current input for the request
                 inputText = ""
+
+                // 5. Convert app's List<String> into backend's List<HistoryMessage>
+                val geminiHistory = chatHistory.map {
+                    if (it.startsWith("User: ")) {
+                        HistoryMessage(role = "user", text = it.removePrefix("User: "))
+                    } else { // Assumes "AI: "
+                        HistoryMessage(role = "model", text = it.removePrefix("AI: "))
+                    }
+                }
+
+                // 6. Create the new ChatRequest
+                val request = ChatRequest(
+                    permanentContext = permanentContexts.joinToString("\n"),
+                    chatHistory = geminiHistory
+                )
                 // --- END OF NEW "Send" LOGIC ---
 
                 coroutineScope.launch {
                     try {
-                        // --- NEW PLAN: Combine both lists to create the full context ---
-                        val permanentFacts = permanentContexts.joinToString("\n")
-                        val currentChat = chatHistory.joinToString("\n")
-
-                        // We send permanent facts first, then the chat history
-                        val fullContext = "$permanentFacts\n\n$currentChat"
-
-                        val request = ChatRequest(message = currentInput, context = fullContext)
                         val response = ChatApi.service.chat(request)
 
-                        // --- NEW PLAN: Save the AI's response to chat history ---
-                        val aiResponse = "AI: ${response.content}"
-                        chatHistory.add(aiResponse) // Add the AI's reply
-                        val newChatJson = gson.toJson(chatHistory) // Re-save the list
-                        prefs.edit().putString(CHAT_HISTORY_KEY, newChatJson).apply()
+                        // --- BACKEND SYNC: Handle the 3+ response types ---
+                        when (response.type) {
+                            "text" -> {
+                                val aiReply = response.content ?: "I have no reply."
+                                // Save the AI's response to chat history
+                                chatHistory.add("AI: $aiReply")
+                                saveChatHistory(chatHistory)
+                                // Show the AI response in the reply box
+                                responseText = aiReply
+                            }
+                            "alarm" -> {
+                                val time = response.time ?: "00:00"
+                                val label = response.label ?: "Alarm"
+                                // Call the native function
+                                onSetAlarm(time, label)
+                                // Set a user-friendly response
+                                responseText = "Okay, I'm setting an alarm for $time with the label '$label'."
+                                // We don't save this to chat history, as it's an action
+                            }
+                            "context_update" -> {
+                                val newContextContent = response.content ?: ""
+                                // The AI sent us the new, complete list of facts
+                                val newFactList = newContextContent.split("\n")
+                                savePermanentContexts(newFactList)
 
-                        // Show the AI response in the reply box
-                        responseText = response.content
-                        Log.d("ChatApp", "API Success: ${response.content}")
+                                responseText = "Okay, I've updated your permanent facts."
+                                Toast.makeText(context, "Permanent facts updated by AI!", Toast.LENGTH_LONG).show()
+                            }
+                            else -> {
+                                responseText = "Received an unknown response type: ${response.type}"
+                            }
+                        }
+
+                        Log.d("ChatApp", "API Success: ${response.type}")
 
                     } catch (e: IOException) {
                         responseText = "Error: Could not connect to server. Check IP and Wi-Fi."
@@ -439,7 +502,9 @@ fun ChatUI(
 fun ChatUIPreview() {
     HelloWorldTheme {
         ChatUI(
-            onSpeak = {}
+            onSpeak = {},
+            // --- BACKEND SYNC: Add new param to preview ---
+            onSetAlarm = { _, _ -> }
         )
     }
 }
