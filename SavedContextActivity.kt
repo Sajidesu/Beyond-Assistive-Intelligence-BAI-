@@ -31,7 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.mutableStateListOf
 import com.google.gson.Gson
 
-// --- NEW PLAN: This key MUST match the permanent one in MainActivity ---
+// This key MUST match the permanent one in MainActivity
 private const val PERMANENT_CONTEXT_KEY = "PermanentContexts"
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,7 +43,6 @@ class SavedContextsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // This line is unchanged, it still reads "CONTEXT_LIST" from the intent
         val savedContexts = intent.getStringArrayListExtra("CONTEXT_LIST") ?: arrayListOf()
         contextsStateList.addAll(savedContexts)
 
@@ -54,7 +53,7 @@ class SavedContextsActivity : ComponentActivity() {
                 Scaffold(
                     topBar = {
                         TopAppBar(
-                            title = { Text("Edit Saved") }, // Your "Edit Saved" title
+                            title = { Text("Edit Permanent Facts") }, // Clearer Title
                             navigationIcon = {
                                 IconButton(onClick = {
                                     context.finish()
@@ -78,6 +77,7 @@ class SavedContextsActivity : ComponentActivity() {
                             itemsIndexed(contextsStateList) { index, itemText ->
                                 OutlinedTextField(
                                     value = itemText,
+                                    // --- TYPO FIX: onValueChange (not onValueSChange) ---
                                     onValueChange = { newText ->
                                         if (newText.isEmpty()) {
                                             contextsStateList.removeAt(index)
@@ -113,9 +113,7 @@ class SavedContextsActivity : ComponentActivity() {
 
         val prefs = getSharedPreferences("ChatAppPreferences", Context.MODE_PRIVATE)
         val json = gson.toJson(contextsStateList)
-
-        // --- NEW PLAN: This is the one-line logic change ---
-        // Save the edits to the PERMANENT key, not the old key
+        // Save the edits to the PERMANENT key
         prefs.edit().putString(PERMANENT_CONTEXT_KEY, json).apply()
     }
 }
