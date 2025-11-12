@@ -3,7 +3,6 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <queries>
@@ -11,9 +10,6 @@
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
 
-        <intent>
-            <action android:name="android.provider.AlarmClock.ACTION_SET_ALARM" />
-        </intent>
     </queries>
 
     <application
@@ -29,19 +25,25 @@
 
 
         <activity
-        android:name=".MainActivity" android:exported="true"
-        android:label="@string/app_name"
-        android:theme="@style/Theme.HelloWorld">
-        <intent-filter>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent-filter>
-    </activity>
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.HelloWorld">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".SavedContextsActivity"
             android:exported="false"
             android:label="Saved Contexts" />
+
+        <activity
+            android:name=".ChatHistoryActivity"
+            android:exported="false"
+            android:label="Chat History" />
 
     </application>
 
