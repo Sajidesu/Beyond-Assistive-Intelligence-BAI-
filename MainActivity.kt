@@ -19,8 +19,7 @@ import com.example.helloworld.network.ChatRequest
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.io.IOException
-// --- TASK 4: Import your AssistantActions class ---
-import com.example.helloworld.actions.AssistantActions
+
 
 // --- MERGE: Imports from Teammate's file (Task 1 & 2) ---
 import android.Manifest
@@ -46,24 +45,17 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.util.ArrayList
 
-// --- FIX: I moved this line here, outside of any function ---
 private const val CONTEXT_LIST_KEY = "ContextList"
 // -------------------------------------
 
 // The main entry point for the Activity
 class MainActivity : ComponentActivity() {
 
-    // --- TASK 4: Create a variable for your AssistantActions ---
-    private lateinit var actions: AssistantActions
-
     // --- MERGE: Task 2 (TextToSpeech engine) ---
     private var textToSpeech: TextToSpeech? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // --- TASK 4: Initialize AssistantActions with the context ---
-        actions = AssistantActions(applicationContext)
 
         // --- MERGE: Task 2 (TextToSpeech) Initialization ---
         textToSpeech = TextToSpeech(this) { status ->
@@ -86,13 +78,8 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // --- TASK 4: Pass the action functions down to the UI ---
+                    // --- OMITTED: Removed onTestAlarm from the ChatUI call ---
                     ChatUI(
-                        onTestAlarm = {
-                            // Define what the "Test Alarm" button will do
-                            actions.setAlarm(9, 30, "Test Alarm") // Using new Int params
-                        },
-
                         // --- MERGE: Pass the REAL speak function (Task 2) ---
                         onSpeak = { text ->
                             speak(text)
@@ -128,8 +115,7 @@ class MainActivity : ComponentActivity() {
 // Our main composable function for the UI layout
 @Composable
 fun ChatUI(
-    // --- TASK 4: Add parameters to receive the functions ---
-    onTestAlarm: () -> Unit,
+    // --- OMITTED: Removed onTestAlarm parameter ---
     // --- MERGE: Add parameter for Task 2 speak function ---
     onSpeak: (String) -> Unit
 ) {
@@ -143,8 +129,6 @@ fun ChatUI(
         context.getSharedPreferences("ChatAppPreferences", Context.MODE_PRIVATE)
     }
     val gson = remember { Gson() }
-
-    // --- FIX: The error line was here, I removed it ---
 
 
     // Helper function to load the list from memory
@@ -347,18 +331,7 @@ fun ChatUI(
 
         // ... (Rest of the file is the same) ...
 
-        // --- TASK 4: Add temporary test buttons (Your UI) ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            Button(onClick = onTestAlarm) {
-                Text("Test Alarm")
-            }
-
-        }
+        // --- OMITTED: Removed the "Test Alarm" button row ---
         // --- End of TASK 4 buttons ---
 
         // --- MERGE: Added Teammate's UI (Task 1 & 2 Buttons) ---
@@ -440,8 +413,8 @@ fun ChatUI(
 @Composable
 fun ChatUIPreview() {
     HelloWorldTheme {
+        // --- OMITTED: Removed onTestAlarm from preview ---
         ChatUI(
-            onTestAlarm = {},
             onSpeak = {}
         )
     }
