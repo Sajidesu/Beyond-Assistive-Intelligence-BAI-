@@ -44,7 +44,9 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.util.ArrayList
 
-private const val CONTEXT_LIST_KEY = "ContextList"
+// --- NEW PLAN: We now have TWO separate keys for memory ---
+private const val PERMANENT_CONTEXT_KEY = "PermanentContexts" // For editable, permanent facts
+private const val CHAT_HISTORY_KEY = "ChatHistory" // For the temporary chat log
 // -------------------------------------
 
 // The main entry point for the Activity
@@ -125,9 +127,9 @@ fun ChatUI(
     }
     val gson = remember { Gson() }
 
-    // Helper function to load the list from memory
-    fun loadSavedContexts(): MutableList<String> {
-        val json = prefs.getString(CONTEXT_LIST_KEY, null)
+    // --- NEW PLAN: Helper function to load PERMANENT contexts ---
+    fun loadPermanentContexts(): MutableList<String> {
+        val json = prefs.getString(PERMANENT_CONTEXT_KEY, null)
         return if (json == null) {
             mutableListOf()
         } else {
@@ -135,13 +137,22 @@ fun ChatUI(
             gson.fromJson(json, type)
         }
     }
-    // --- END OF LIST LOGIC ---
+
+    // --- NEW PLAN: Helper function to load CHAT history ---
+    fun loadChatHistory(): MutableList<String> {
+        val json = prefs.getString(CHAT_HISTORY_KEY, null)
+        return if (json == null) {
+            mutableListOf()
+        } else {
+            val type = object : TypeToken<MutableList<String>>() {}.type
+            gson.fromJson(json, type)
+        }
+    }
+    // --- END OF NEW PLAN ---
 
 
     // --- CHAT LOGIC: This is now your one and only input field ---
     var inputText by remember { mutableStateOf("") }
-
-    // --- CHAT LOGIC: 'messageText' variable is GONE ---
 
     // State to hold the response from the server/model
     var responseText by remember { mutableStateOf("Server reply will appear here.") }
@@ -151,13 +162,12 @@ fun ChatUI(
     // --- MERGE: Task 1 (SpeechRecognizer) Logic from VoiceApp ---
     var isListening by remember { mutableStateOf(false) }
 
-    // Helper function to start speech recognition
+    // ... (All Speech Recognizer code remains unchanged) ...
     fun startSpeechRecognition(launcher: ActivityResultLauncher<Intent>) {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             Toast.makeText(context, "Speech recognition not available", Toast.LENGTH_SHORT).show()
             return
         }
-
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
@@ -165,7 +175,6 @@ fun ChatUI(
         }
         launcher.launch(intent)
     }
-
     val speechRecognitionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -173,7 +182,6 @@ fun ChatUI(
         if (result.resultCode == Activity.RESULT_OK) {
             val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 ?.get(0) ?: ""
-            // --- CHAT LOGIC: Put spoken text into the main input box ---
             inputText = spokenText
         } else {
             Toast.makeText(context, "Speech recognition failed", Toast.LENGTH_SHORT).show()
@@ -212,27 +220,64 @@ fun ChatUI(
                 .padding(vertical = 8.dp)
         )
 
-        // --- CHAT LOGIC: "Save" button is gone. "View Saved" is now by itself ---
+        // --- NEW PLAN: Button Row for memory management ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // --- 1. View Contexts (Permanent, Editable) ---
+            Button(
+                onClick = {
+                    val savedList = loadPermanentContexts()
+                    if (savedList.isEmpty()) {
+                        Toast.makeText(context, "No saved contexts.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val intent = Intent(context, SavedContextsActivity::class.java).apply {
+                            // We pass the permanent list to the editable screen
+                            putStringArrayListExtra("CONTEXT_LIST", ArrayList(savedList))
+                        }
+                        context.startActivity(intent)
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("View Contexts")
+            }
+
+            // --- 2. Chat History (Temporary, Read-only) ---
+            Button(
+                onClick = {
+                    val savedList = loadChatHistory()
+                    if (savedList.isEmpty()) {
+                        Toast.makeText(context, "No chat history.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val intent = Intent(context, ChatHistoryActivity::class.java).apply {
+                            // We pass the chat history list to the read-only screen
+                            putStringArrayListExtra("CHAT_HISTORY_LIST", ArrayList(savedList))
+                        }
+                        context.startActivity(intent)
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Chat History")
+            }
+        }
+
+        // --- 3. New Chat Button ---
         Button(
             onClick = {
-                val savedList = loadSavedContexts()
-                if (savedList.isEmpty()) {
-                    Toast.makeText(context, "No saved messages.", Toast.LENGTH_SHORT).show()
-                } else {
-                    val intent = Intent(context, SavedContextsActivity::class.java).apply {
-                        putStringArrayListExtra("CONTEXT_LIST", ArrayList(savedList))
-                    }
-                    context.startActivity(intent)
-                }
+                // This button clears ONLY the chat history
+                prefs.edit().remove(CHAT_HISTORY_KEY).apply()
+                // Clear the server reply box as well
+                responseText = "New chat started. Chat history cleared."
             },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
         ) {
-            Text("View Saved Messages")
+            Text("New Chat")
         }
-        // --- END OF CHAT LOGIC ---
+        // --- END OF NEW PLAN ---
 
-
-        // --- CHAT LOGIC: "Message" text field is GONE ---
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -248,17 +293,18 @@ fun ChatUI(
                 isLoading = true
                 responseText = "Sending request..."
 
-                // --- CHAT LOGIC: New "Send" logic ---
-                // 1. Load the current chat history
-                val chatHistory = loadSavedContexts()
+                // --- NEW PLAN: Updated Send Logic ---
+                // 1. Load BOTH memory lists
+                val permanentContexts = loadPermanentContexts()
+                val chatHistory = loadChatHistory()
 
-                // 2. Add the user's new message to the history
+                // 2. Add the user's new message to the chat history
                 val userMessage = "User: $inputText"
                 chatHistory.add(userMessage)
 
-                // 3. Save the *updated* history
-                val json = gson.toJson(chatHistory)
-                prefs.edit().putString(CONTEXT_LIST_KEY, json).apply()
+                // 3. Save the *updated* chat history
+                val chatJson = gson.toJson(chatHistory)
+                prefs.edit().putString(CHAT_HISTORY_KEY, chatJson).apply()
 
                 // 4. Clear the input box
                 val currentInput = inputText // Save current input for the request
@@ -267,18 +313,21 @@ fun ChatUI(
 
                 coroutineScope.launch {
                     try {
-                        // --- CHAT LOGIC: Send the full history as context,
-                        // and the current message as the "message"
-                        val fullContext = chatHistory.joinToString("\n")
-                        val request = ChatRequest(message = currentInput, context = fullContext)
+                        // --- NEW PLAN: Combine both lists to create the full context ---
+                        val permanentFacts = permanentContexts.joinToString("\n")
+                        val currentChat = chatHistory.joinToString("\n")
 
+                        // We send permanent facts first, then the chat history
+                        val fullContext = "$permanentFacts\n\n$currentChat"
+
+                        val request = ChatRequest(message = currentInput, context = fullContext)
                         val response = ChatApi.service.chat(request)
 
-                        // --- CHAT LOGIC: Save the AI's response to history ---
+                        // --- NEW PLAN: Save the AI's response to chat history ---
                         val aiResponse = "AI: ${response.content}"
-                        chatHistory.add(aiResponse)
-                        val newJson = gson.toJson(chatHistory)
-                        prefs.edit().putString(CONTEXT_LIST_KEY, newJson).apply()
+                        chatHistory.add(aiResponse) // Add the AI's reply
+                        val newChatJson = gson.toJson(chatHistory) // Re-save the list
+                        prefs.edit().putString(CHAT_HISTORY_KEY, newChatJson).apply()
 
                         // Show the AI response in the reply box
                         responseText = response.content
@@ -311,11 +360,8 @@ fun ChatUI(
             }
         }
 
-        // --- OMITTED: Removed the "Test Alarm" button row ---
-
         // --- MERGE: Added Teammate's UI (Task 1 & 2 Buttons) ---
-
-        Spacer(modifier = Modifier.height(16.dp)) // Spacer from teammate's code
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Task 1: Microphone Button
         Button(
@@ -351,7 +397,6 @@ fun ChatUI(
         // Task 2: Speak Button
         Button(
             onClick = {
-                // --- CHAT LOGIC: Speak the text from the main input box ---
                 if (inputText.isNotBlank()) {
                     onSpeak(inputText)
                 } else {
