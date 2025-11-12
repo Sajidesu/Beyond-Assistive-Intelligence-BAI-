@@ -19,6 +19,7 @@ import android.app.Activity
 import android.content.Context
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,7 +31,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.mutableStateListOf
 import com.google.gson.Gson
 
-private const val CONTEXT_LIST_KEY = "ContextList"
+// --- NEW PLAN: This key MUST match the permanent one in MainActivity ---
+private const val PERMANENT_CONTEXT_KEY = "PermanentContexts"
 
 @OptIn(ExperimentalMaterial3Api::class)
 class SavedContextsActivity : ComponentActivity() {
@@ -41,6 +43,7 @@ class SavedContextsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // This line is unchanged, it still reads "CONTEXT_LIST" from the intent
         val savedContexts = intent.getStringArrayListExtra("CONTEXT_LIST") ?: arrayListOf()
         contextsStateList.addAll(savedContexts)
 
@@ -51,7 +54,7 @@ class SavedContextsActivity : ComponentActivity() {
                 Scaffold(
                     topBar = {
                         TopAppBar(
-                            title = { Text("Saved Contexts") },
+                            title = { Text("Edit Saved") }, // Your "Edit Saved" title
                             navigationIcon = {
                                 IconButton(onClick = {
                                     context.finish()
@@ -76,19 +79,26 @@ class SavedContextsActivity : ComponentActivity() {
                                 OutlinedTextField(
                                     value = itemText,
                                     onValueChange = { newText ->
-                                        // --- THIS IS THE FIX ---
                                         if (newText.isEmpty()) {
-                                            // If the text is deleted, remove the item
                                             contextsStateList.removeAt(index)
                                         } else {
-                                            // Otherwise, just update it
                                             contextsStateList[index] = newText
                                         }
-                                        // --- END OF FIX ---
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 4.dp)
+                                        .padding(vertical = 4.dp),
+
+                                    trailingIcon = {
+                                        IconButton(onClick = {
+                                            contextsStateList.removeAt(index)
+                                        }) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Delete,
+                                                contentDescription = "Delete item"
+                                            )
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -101,9 +111,11 @@ class SavedContextsActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
 
-        // This save logic is now even more important!
         val prefs = getSharedPreferences("ChatAppPreferences", Context.MODE_PRIVATE)
         val json = gson.toJson(contextsStateList)
-        prefs.edit().putString(CONTEXT_LIST_KEY, json).apply()
+
+        // --- NEW PLAN: This is the one-line logic change ---
+        // Save the edits to the PERMANENT key, not the old key
+        prefs.edit().putString(PERMANENT_CONTEXT_KEY, json).apply()
     }
 }
