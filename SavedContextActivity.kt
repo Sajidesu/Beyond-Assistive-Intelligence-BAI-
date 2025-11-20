@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.example.helloworld.ui.theme.HelloWorldTheme
 import com.google.gson.Gson
 
-// This key MUST match the one in MainActivity
+
 private const val PERMANENT_CONTEXT_KEY = "PermanentContexts"
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,7 +31,7 @@ class SavedContextsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Load data passed from MainActivity
+        
         val savedContexts = intent.getStringArrayListExtra("CONTEXT_LIST") ?: arrayListOf()
         contextsStateList.addAll(savedContexts)
 
@@ -97,7 +97,6 @@ class SavedContextsActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        // Save changes to SharedPreferences when user leaves this screen
         val prefs = getSharedPreferences("ChatAppPreferences", Context.MODE_PRIVATE)
         val json = gson.toJson(contextsStateList)
         prefs.edit().putString(PERMANENT_CONTEXT_KEY, json).apply()
