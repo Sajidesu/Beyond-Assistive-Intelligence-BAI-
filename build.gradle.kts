@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.example.helloworld"
-    compileSdk = 34 // Or whatever your latest SDK is
+    compileSdk = 34 
 
     defaultConfig {
         applicationId = "com.example.helloworld"
@@ -61,19 +61,19 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
 
-    // --- YOUR CRITICAL DEPENDENCIES ---
+   
 
-    // 1. Retrofit (For Networking)
+   
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
 
-    // 2. Icons (For the Microphone and other UI icons)
+    
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
 
-    // 3. Coroutines (For async tasks)
+    
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // ----------------------------------
+    
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
