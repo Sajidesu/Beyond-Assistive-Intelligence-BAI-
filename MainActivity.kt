@@ -60,7 +60,7 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.launch
 import java.util.*
 
-// --- DESIGN COLORS ---
+
 val BaiYellow = Color(0xFFFFE066)
 val BaiBubbleYellow = Color(0xFFFFE082)
 val BaiWhite = Color(0xFFFFFFFF)
@@ -87,7 +87,7 @@ class MainActivity : ComponentActivity() {
             HelloWorldTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = BaiYellow // Applied Background Color
+                    color = BaiYellow 
                 ) {
                     ChatUI(
                         onSpeak = { text -> speak(text) },
@@ -122,20 +122,20 @@ fun ChatUI(
     val prefs = remember { context.getSharedPreferences("ChatAppPreferences", Context.MODE_PRIVATE) }
     val gson = remember { Gson() }
 
-    // --- STATE ---
+    
     var inputText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var isListening by remember { mutableStateOf(false) }
 
-    // Design State
+   
     var showTools by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var isChatting by remember { mutableStateOf(false) }
 
-    // We maintain the history list state for the UI
+    
     var chatHistory by remember { mutableStateOf<MutableList<String>>(mutableListOf()) }
 
-    // --- HELPER FUNCTIONS ---
+    
     fun loadPermanentContexts(): MutableList<String> {
         val json = prefs.getString(PERMANENT_CONTEXT_KEY, null)
         return if (json == null) mutableListOf() else gson.fromJson(json, object : TypeToken<MutableList<String>>() {}.type)
@@ -149,7 +149,7 @@ fun ChatUI(
     fun saveChatHistory(history: List<String>) {
         val json = gson.toJson(history)
         prefs.edit().putString(CHAT_HISTORY_KEY, json).apply()
-        chatHistory = history.toMutableList() // Trigger UI update
+        chatHistory = history.toMutableList() 
     }
 
     fun savePermanentContexts(contexts: List<String>) {
@@ -157,31 +157,31 @@ fun ChatUI(
         prefs.edit().putString(PERMANENT_CONTEXT_KEY, json).apply()
     }
 
-    // Load initial history
+    
     LaunchedEffect(Unit) {
         chatHistory = loadChatHistoryList()
         if (chatHistory.isNotEmpty()) isChatting = true
     }
 
-    // --- CORE LOGIC (YOUR RAW CODE WRAPPED IN A FUNCTION) ---
+    
     fun sendMessage() {
         if (isLoading || inputText.isBlank()) return
         isLoading = true
         val msgText = inputText
-        inputText = "" // Clear input immediately
+        inputText = "" 
         keyboardController?.hide()
 
-        // Ensure we are in chat mode
+        
         isChatting = true
 
         val currentHistory = loadChatHistoryList()
         val contexts = loadPermanentContexts()
 
-        // 1. Add User Message
+        
         currentHistory.add("User: $msgText")
         saveChatHistory(currentHistory)
 
-        // 2. Prepare API
+        
         val apiHistory = currentHistory.map {
             if (it.startsWith("User: ")) HistoryMessage("user", it.removePrefix("User: "))
             else HistoryMessage("model", it.removePrefix("AI: "))
@@ -196,21 +196,19 @@ fun ChatUI(
             try {
                 val response = ChatApi.service.chat(request)
 
-                // CHECK FOR ERRORS
+               
                 if (response.type == "error") {
                     if (response.errorType == "model_overloaded") {
                         Toast.makeText(context, "AI is overloaded. Please try again.", Toast.LENGTH_LONG).show()
                     } else {
                         val errorMsg = response.message ?: "Unknown error"
                         Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
-                        // Optional: Add error to chat history?
-                        // currentHistory.add("System: $errorMsg")
-                        // saveChatHistory(currentHistory)
+                       
                     }
                 } else {
-                    // SUCCESS
+                  
 
-                    // 1. Handle Text
+                    
                     val aiText = response.message ?: response.content ?: ""
                     if (aiText.isNotBlank()) {
                         currentHistory.add("AI: $aiText")
@@ -218,7 +216,7 @@ fun ChatUI(
                         onSpeak(aiText)
                     }
 
-                    // 2. Handle Tools
+                    
                     if ((response.type == "multi_tool_result" || response.type == "text") && response.results != null) {
                         response.results.forEach { tool ->
                             when (tool.type) {
@@ -256,7 +254,7 @@ fun ChatUI(
         }
     }
 
-    // --- SPEECH RECOGNITION ---
+    
     fun startSpeechRecognition(launcher: ActivityResultLauncher<Intent>) {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             Toast.makeText(context, "Speech not available", Toast.LENGTH_SHORT).show()
@@ -284,10 +282,10 @@ fun ChatUI(
         if (isGranted) startSpeechRecognition(speechLauncher)
     }
 
-    // --- VISUAL UI LAYOUT ---
+    
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // 1. TOP BAR
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -336,14 +334,14 @@ fun ChatUI(
             )
         }
 
-        // 2. MAIN CONTENT (Face or Chat)
+        
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
         ) {
             if (!isChatting && chatHistory.isEmpty()) {
-                // --- FACE DASHBOARD ---
+                
                 Column(
                     modifier = Modifier
                         .align(Alignment.Center)
@@ -352,10 +350,10 @@ fun ChatUI(
                 ) {
                     Canvas(modifier = Modifier.size(150.dp)) {
                         drawCircle(color = BaiWhite)
-                        // Eyes
+                        
                         drawCircle(color = Color(0xFF4E342E), radius = 20f, center = center.copy(x = center.x - 40f, y = center.y - 10f))
                         drawCircle(color = Color(0xFF4E342E), radius = 20f, center = center.copy(x = center.x + 40f, y = center.y - 10f))
-                        // Mouth
+                        
                         drawArc(
                             color = Color(0xFF4E342E),
                             startAngle = 0f,
@@ -370,12 +368,12 @@ fun ChatUI(
                     Text("Tap to start chatting", color = Color.White, modifier = Modifier.padding(top = 16.dp))
                 }
             } else {
-                // --- CHAT BUBBLES ---
+                
                 ChatScreen(chatHistory = chatHistory, isLoading = isLoading)
             }
         }
 
-        // 3. TOOL BAR (Hidden by default)
+        
         AnimatedVisibility(visible = showTools) {
             Row(
                 modifier = Modifier
@@ -392,13 +390,13 @@ fun ChatUI(
                     }
                     context.startActivity(intent)
                 }
-                // Add other placeholders
+                
                 ToolIcon(Icons.Outlined.CameraAlt, "Camera") {}
                 ToolIcon(Icons.Outlined.Image, "Gallery") {}
             }
         }
 
-        // 4. INPUT BAR
+        
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -471,7 +469,7 @@ fun ChatUI(
     }
 }
 
-// --- HELPER COMPOSABLES ---
+
 
 @Composable
 fun ChatScreen(chatHistory: List<String>, isLoading: Boolean) {
