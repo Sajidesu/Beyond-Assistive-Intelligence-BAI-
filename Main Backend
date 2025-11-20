@@ -1,0 +1,373 @@
+# Program.py — production-ready backend (tools: create_task, create_alarm, update_context)
+from datetime import datetime, timedelta, timezone
+import os
+import json
+import uvicorn
+import httpx
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List, Any, Dict, Optional, Tuple
+import re
+import logging
+
+# Optional dependency for robust natural-language datetime parsing
+try:
+    import dateparser  # type: ignore
+except Exception:
+    dateparser = None
+
+# Gemini imports (same usage as before)
+from google import genai
+from google.genai.types import HarmCategory, HarmBlockThreshold
+
+# ------------------------------
+# Basic logging
+# ------------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("brain-server")
+
+# ------------------------------
+# CONFIG (env overrides)
+# ------------------------------
+GEN_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEN_API_KEY = os.getenv("GEMINI_API_KEY")
+TASK_SERVER_URL = os.getenv("TASK_SERVER_URL", "http://127.0.0.1:8001/create-task")
+
+# Persistence off (chosen: clear alarms on restart)
+ALARM_PERSIST = False
+ALARM_EXPIRATION_ENABLED = True  # auto-delete expired alarms on each request
+
+# ------------------------------
+# DATA MODELS
+# ------------------------------
+class HistoryMessage(BaseModel):
+    role: str
+    text: str
+
+class ChatRequest(BaseModel):
+    permanent_context: str
+    chat_history: List[HistoryMessage]
+
+# ------------------------------
+# FASTAPI + HTTPX setup
+# ------------------------------
+app = FastAPI()
+http_client = httpx.AsyncClient(timeout=10.0)
+
+# ------------------------------
+# ALARM STORAGE (in-memory only)
+# ------------------------------
+ACTIVE_ALARMS: List[Dict[str, Any]] = []
+
+def alarm_key_from_parts(label_norm: str, time_iso_or_raw: str) -> str:
+    return f"{label_norm.strip().lower()} | {time_iso_or_raw.strip().lower()}"
+
+# ------------------------------
+# LABEL NORMALIZATION
+# ------------------------------
+def normalize_label(label: Optional[str]) -> str:
+    if not label:
+        return ""
+    s = label.lower().strip()
+    remove_words = ["reminder", "remind", "alarm", "please", "about", "me", "notification", "notify", "set", "a"]
+    for w in remove_words:
+        s = re.sub(r"\b" + re.escape(w) + r"\b", " ", s)
+    s = re.sub(r"[^\w\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+# ------------------------------
+# TIME PARSING (prefer ISO)
+# ------------------------------
+def parse_time_to_iso(time_text: Optional[str]) -> Optional[str]:
+    if not time_text:
+        return None
+    try:
+        if dateparser:
+            settings = {"RETURN_AS_TIMEZONE_AWARE": True, "TO_TIMEZONE": "UTC", "PREFER_DATES_FROM": "future"}
+            dt = dateparser.parse(time_text, settings=settings)
+            if isinstance(dt, datetime):
+                dt_utc = dt.astimezone(timezone.utc)
+                return dt_utc.replace(microsecond=0).isoformat()
+    except Exception:
+        logger.exception("dateparser failed for: %s", time_text)
+    # Fallback: HH:MM detection and simple tomorrow handling
+    m = re.search(r"(\d{1,2}):(\d{2})", time_text or "")
+    if m:
+        try:
+            hour = int(m.group(1))
+            minute = int(m.group(2))
+            base = datetime.now(timezone.utc)
+            if re.search(r"\btomorrow\b", time_text, flags=re.I):
+                base = (base.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
+            return base.replace(hour=hour, minute=minute, second=0, microsecond=0).isoformat()
+        except Exception:
+            pass
+    return None
+
+# ------------------------------
+# BUILD ALARM MEMORY TEXT (for system instruction)
+# ------------------------------
+def build_alarm_memory_text() -> str:
+    if not ACTIVE_ALARMS:
+        return "No active alarms are set."
+    lines = []
+    for a in ACTIVE_ALARMS:
+        label = a.get("label", a.get("label_norm", "reminder"))
+        time_repr = a.get("time_iso") or a.get("time_raw") or "unknown time"
+        lines.append(f"- Alarm '{label}' set for {time_repr}.")
+    return "\n".join(lines)
+
+# ------------------------------
+# TOOL DECLARATIONS (canonical names)
+# ------------------------------
+def create_alarm(time: str, label: str):
+    return {"name": "create_alarm", "time": time, "label": label}
+
+def create_task(task_title: str):
+    return {"name": "create_task", "task_title": task_title}
+
+def update_context(new_context: str):
+    return {"name": "update_context", "new_context": new_context}
+
+GEMINI_TOOLS = [create_alarm, create_task, update_context]
+
+# ------------------------------
+# SAFETY + GENERATION CONFIG
+# ------------------------------
+GEN_CONFIG = {"temperature": 0.3}
+SAFETY_SETTINGS = [
+    {"category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE},
+    {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE},
+    {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE},
+    {"category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE}
+]
+
+# ------------------------------
+# SYSTEM INSTRUCTION
+# ------------------------------
+SYSTEM_INSTRUCTION = """
+You are a helpful assistant that can perform multiple tool actions in response to a single user message.
+Follow these rules exactly:
+
+1) If the user explicitly says "remind me" (or close variants) AND gives an event/time in the same message, produce in order:
+   - A short natural-language confirmation (text).
+   - create_task (concise task title).
+   - create_alarm (time + label).
+   - update_context (store the core fact).
+
+2) If the user provides an event/time but does NOT say "remind me", call only update_context.
+
+3) If the user later says "remind me" without details and relevant info exists in permanent context, create only an alarm (avoid duplicates).
+
+4) Always emit hybrid responses: text first, then function calls. Text must NOT contain JSON.
+
+5) When deciding to create alarms, be informed of currently active alarms (provided in the system instruction).
+
+6) If you cannot parse a time, ask a clarification question.
+"""
+
+# ------------------------------
+# INIT GEMINI CLIENT
+# ------------------------------
+gemini_client = None
+try:
+    if not GEN_API_KEY:
+        logger.warning("GEMINI_API_KEY missing! The model client may not authenticate.")
+    gemini_client = genai.Client(api_key=GEN_API_KEY)
+    logger.info("Gemini client initialized.")
+except Exception:
+    logger.exception("FATAL ERROR initializing Gemini client")
+    gemini_client = None
+
+# ------------------------------
+# TOOL HANDLERS (safe)
+# ------------------------------
+async def handle_create_task(task_title: str, message: str) -> Dict[str, Any]:
+    if not task_title:
+        return {"type": "task_create_failed", "task_title": task_title, "message": "No task title provided."}
+    try:
+        resp = await http_client.post(TASK_SERVER_URL, json={"task_title": task_title})
+        data = resp.json()
+    except Exception:
+        logger.exception("Failed to contact task server")
+        return {"type": "task_create_error", "task_title": task_title, "message": "Google Tasks error."}
+    if data.get("status") == "success":
+        return {"type": "task_create_success", "task_title": task_title, "message": message}
+    return {"type": "task_create_failed", "task_title": task_title, "details": data}
+
+def handle_create_alarm(time_raw: Optional[str], label_raw: Optional[str], message: str) -> Dict[str, Any]:
+    label_norm = normalize_label(label_raw or "")
+    label_display = label_norm or (label_raw or "reminder")
+    time_iso = parse_time_to_iso(time_raw or "")
+    time_identifier = time_iso or (time_raw or "").strip()
+    key = alarm_key_from_parts(label_norm or label_display, time_identifier)
+    cleanup_expired_alarms()
+    for a in ACTIVE_ALARMS:
+        if a.get("key") == key:
+            return {"type": "alarm_exists", "time": time_identifier, "label": a.get("label", label_display), "message": "You already have an alarm set for that."}
+    alarm_obj = {
+        "time_raw": time_raw or "",
+        "time_iso": time_iso,
+        "label": label_display,
+        "label_norm": label_norm,
+        "key": key
+    }
+    ACTIVE_ALARMS.append(alarm_obj)
+    return {"type": "alarm", "time": time_identifier, "label": label_display, "message": message}
+
+def handle_update_context(new_context: str, message: str) -> Dict[str, Any]:
+    return {"type": "context_update", "content": new_context, "message": message}
+
+# ------------------------------
+# ALARM CLEANUP (expiration)
+# ------------------------------
+def cleanup_expired_alarms() -> None:
+    if not ALARM_EXPIRATION_ENABLED:
+        return
+    now = datetime.now(timezone.utc)
+    changed = False
+    kept: List[Dict[str, Any]] = []
+    for a in ACTIVE_ALARMS:
+        iso = a.get("time_iso")
+        if iso:
+            try:
+                dt = datetime.fromisoformat(iso)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if dt > now:
+                    kept.append(a)
+                else:
+                    changed = True
+            except Exception:
+                kept.append(a)
+        else:
+            kept.append(a)
+    if changed:
+        ACTIVE_ALARMS.clear()
+        ACTIVE_ALARMS.extend(kept)
+
+# ------------------------------
+# ROBUST RESPONSE PARSING
+# ------------------------------
+def extract_text_and_function_calls(response) -> Tuple[List[str], List[Any]]:
+    text_parts: List[str] = []
+    function_calls: List[Any] = []
+
+    def _process_parts(parts: Any) -> None:
+        if not parts:
+            return
+        for p in parts:
+            if hasattr(p, "text") and getattr(p, "text"):
+                text_parts.append(p.text)
+            elif hasattr(p, "function_call") and getattr(p, "function_call"):
+                function_calls.append(p.function_call)
+            else:
+                continue
+
+    try:
+        parts = getattr(response.candidates[0].content, "parts", []) or []
+        _process_parts(parts)
+    except Exception:
+        logger.exception("Failed to parse response.candidates parts")
+
+    history = getattr(response, "automatic_function_calling_history", []) or []
+    try:
+        for entry in history:
+            parts = getattr(entry, "parts", []) or []
+            if getattr(entry, "role", None) == "model":
+                _process_parts(parts)
+    except Exception:
+        logger.exception("Failed to parse automatic_function_calling_history")
+
+    return text_parts, function_calls
+
+# ------------------------------
+# CHAT ENDPOINT
+# ------------------------------
+@app.post("/chat")
+async def chat_endpoint(request: ChatRequest):
+    if not gemini_client:
+        return {"type": "text", "content": "Gemini client is not initialized."}
+
+    cleanup_expired_alarms()
+
+    alarm_memory_text = build_alarm_memory_text()
+    current_system_instruction = f"""
+{SYSTEM_INSTRUCTION}
+
+USER'S PERMANENT CONTEXT:
+{request.permanent_context}
+
+CURRENT ACTIVE ALARMS:
+{alarm_memory_text}
+
+---
+Continue the conversation.
+"""
+
+    gemini_history = [{"role": msg.role, "parts": [{"text": msg.text}]} for msg in request.chat_history]
+
+    try:
+        response = gemini_client.models.generate_content(
+            model=GEN_MODEL,
+            contents=gemini_history,
+            config={
+                "temperature": GEN_CONFIG["temperature"],
+                "system_instruction": current_system_instruction,
+                "tools": GEMINI_TOOLS,
+                "safety_settings": SAFETY_SETTINGS,
+            },
+        )
+
+        logger.debug("RAW MODEL RESPONSE: %s", response)
+
+        text_parts, function_calls = extract_text_and_function_calls(response)
+
+        if not function_calls:
+            if text_parts:
+                return {"type": "text", "content": "\n".join(text_parts)}
+            return {"type": "text", "content": "No response from model."}
+
+        aggregated_message = text_parts[0] if text_parts else ""
+        results: List[Dict[str, Any]] = []
+
+        for fc in function_calls:
+            fn_name = getattr(fc, "name", None)
+            raw_args = getattr(fc, "args", {}) or {}
+            try:
+                args = dict(raw_args)
+            except Exception:
+                args = {}
+
+            if fn_name == "create_task":
+                task_title = args.get("task_title") or args.get("title") or ""
+                res = await handle_create_task(task_title, aggregated_message)
+                results.append(res)
+
+            elif fn_name == "create_alarm":
+                time_raw = args.get("time") or args.get("datetime") or args.get("when") or ""
+                label_raw = args.get("label") or args.get("title") or args.get("event") or ""
+                res = handle_create_alarm(time_raw, label_raw, aggregated_message)
+                results.append(res)
+
+            elif fn_name == "update_context":
+                new_context = args.get("new_context") or args.get("context") or args.get("content") or ""
+                res = handle_update_context(new_context, aggregated_message)
+                results.append(res)
+
+            else:
+                results.append({"type": "unknown_tool", "name": fn_name, "args": args})
+
+        return {"type": "multi_tool_result", "message": aggregated_message, "results": results}
+
+    except Exception:
+        logger.exception("Error in chat_endpoint")
+        return {"type": "text", "content": "Internal error during AI processing."}
+
+# ------------------------------
+# START SERVER
+# ------------------------------
+if __name__ == "__main__":
+    logger.info("Starting Brain server on port 8000...")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
