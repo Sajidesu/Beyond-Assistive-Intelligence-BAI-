@@ -8,6 +8,6 @@ Front-end(UI):
 
 Paste the files in Android Studio with the Kotlin JDK. 
 
-Android Studio will ask to 'Sync' the files. Press Sync.
+Android Studio will ask to 'Sync' the files. Press Sync Now.
 
 Then press the 'run' button above to run the application.
