@@ -8,7 +8,7 @@ import retrofit2.http.POST
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-// --- CONFIGURATION ---
+
 private const val BASE_URL = "http://192.168.254.160:8000/" // Double check your IP
 
 data class HistoryMessage(
@@ -37,7 +37,7 @@ data class ChatResponse(
     @SerializedName("message") val message: String?,
     @SerializedName("results") val results: List<ToolResult>?,
 
-    // THIS FIELD IS REQUIRED TO HIDE ERRORS FROM THE UI
+    
     @SerializedName("error_type") val errorType: String?
 )
 
