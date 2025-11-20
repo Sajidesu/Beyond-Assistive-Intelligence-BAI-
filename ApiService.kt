@@ -9,7 +9,7 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 
-private const val BASE_URL = "http://192.168.254.160:8000/" // Double check your IP
+private const val BASE_URL = "http://192.168.254.160:8000/" 
 
 data class HistoryMessage(
     @SerializedName("role") val role: String,
