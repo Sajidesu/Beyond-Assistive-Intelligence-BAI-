@@ -29,14 +29,12 @@ class AssistantActions(private val context: Context) {
             if (alarmDetails.day != null) {
                 putExtra(AlarmClock.EXTRA_DAYS, arrayListOf(alarmDetails.day))
             }
-            putExtra(AlarmClock.EXTRA_SKIP_UI, false) // Kept as false per your OG file
+            putExtra(AlarmClock.EXTRA_SKIP_UI, false) 
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
 
         try {
             context.startActivity(intent)
-            // Optional: Add a Toast here if you want to see what time it set
-            // Toast.makeText(context, "Setting alarm for ${alarmDetails.hour}:${alarmDetails.minute}", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(context, "Error setting alarm", Toast.LENGTH_SHORT).show()
         }
@@ -45,24 +43,24 @@ class AssistantActions(private val context: Context) {
     private data class AlarmDetails(val hour: Int, val minute: Int, val day: Int?)
 
     private fun parseTime(timeString: String): AlarmDetails? {
-        // 1. Try ISO Format with FORCED Manila Timezone (The "OG" Logic)
+        
         try {
-            // Parse the time from the server (usually UTC)
+           
             val offsetDt = OffsetDateTime.parse(timeString, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
 
-            // FORCE it to Philippines time, even if the emulator is in US/UK time
+           
             val localDt = offsetDt.atZoneSameInstant(ZoneId.of("Asia/Manila"))
 
-            val dayOfWeek = localDt.dayOfWeek.value // 1=Mon, 7=Sun
-            // Convert to Calendar day (1=Sun, 2=Mon)
+            val dayOfWeek = localDt.dayOfWeek.value
+         
             val calendarDay = if (dayOfWeek == 7) Calendar.SUNDAY else dayOfWeek + 1
 
             return AlarmDetails(localDt.hour, localDt.minute, calendarDay)
         } catch (e: Exception) {
-            // Log error if needed
+            
         }
 
-        // 2. Fallback for simple formats (e.g. "3:00 PM")
+        
         try {
             val parser12 = SimpleDateFormat("h:mm a", Locale.getDefault())
             val cal = Calendar.getInstance()
