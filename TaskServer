@@ -1,0 +1,52 @@
+# TaskServer.py
+import sys
+import os
+from pathlib import Path
+import asyncio
+import uvicorn
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+# Ensure the script directory is on sys.path so relative imports work regardless of cwd
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+try:
+    from googletrial import create_google_task
+    print("TaskServer: Successfully imported 'create_google_task'.")
+except Exception as e:
+    print(f"TaskServer: FATAL ERROR: Could not import 'create_google_task' from googletrial.py: {e}")
+    raise
+
+class TaskRequest(BaseModel):
+    task_title: str
+
+app = FastAPI()
+
+@app.post("/create-task")
+async def handle_create_task(request: TaskRequest):
+    """
+    Accepts JSON: {"task_title": "..."}
+    Calls the synchronous create_google_task in a background thread to avoid blocking the event loop.
+    Returns a JSON status object with HTTP 200 on success and error details otherwise.
+    """
+    task_title = request.task_title.strip() if request.task_title else ""
+    if not task_title:
+        return {"status": "error", "message": "task_title cannot be empty."}
+
+    try:
+        print(f"TaskServer: Received request to create task: '{task_title}'")
+        # Run blocking Google API call in a thread
+        success = await asyncio.to_thread(create_google_task, task_title)
+        if success:
+            return {"status": "success", "task_title": task_title}
+        else:
+            return {"status": "error", "message": "Google API reported failure creating task."}
+    except Exception as e:
+        print(f"TaskServer: Error creating task: {e}")
+        return {"status": "error", "message": str(e)}
+
+if __name__ == "__main__":
+    print("Starting Google Tasks 'Hands' server on port 8001...")
+    uvicorn.run(app, host="0.0.0.0", port=8001)
