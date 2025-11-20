@@ -1,0 +1,82 @@
+# googletrial.py
+import os
+import json
+from pathlib import Path
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+SCOPES = ["https://www.googleapis.com/auth/tasks"]
+
+# Use token.json located next to this script by default, overridable with TOKEN_FILE env var
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_TOKEN_FILE = BASE_DIR / "token.json"
+TOKEN_FILE = Path(os.getenv("GOOGLE_TOKEN_FILE", DEFAULT_TOKEN_FILE))
+
+def _load_credentials(token_path: Path):
+    if token_path.exists():
+        try:
+            creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+            return creds
+        except Exception as e:
+            # If token file exists but can't be parsed, raise so caller can re-authenticate.
+            raise RuntimeError(f"Failed to load credentials from {token_path}: {e}")
+    return None
+
+def _save_credentials(creds, token_path: Path):
+    try:
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(token_path, "w") as f:
+            f.write(creds.to_json())
+    except Exception as e:
+        # Non-fatal: warn but continue
+        print(f"Warning: could not save token to {token_path}: {e}")
+
+def create_google_task(task_title: str) -> bool:
+    """
+    Create a Google Task in the user's '@default' tasklist.
+
+    Requires a valid token.json created by the Google OAuth quickstart flow.
+    If credentials are expired but refreshable, attempt to refresh and save.
+    """
+    creds = None
+    try:
+        creds = _load_credentials(TOKEN_FILE)
+    except Exception as e:
+        print(e)
+        raise
+
+    # If no creds or invalid, instruct caller to run the quickstart to obtain token.json
+    if not creds or not creds.valid:
+        # Try to refresh if possible
+        if creds and creds.expired and getattr(creds, "refresh_token", None):
+            try:
+                print("Credentials expired. Attempting to refresh...")
+                creds.refresh(Request())
+                print("Credentials refreshed successfully.")
+                _save_credentials(creds, TOKEN_FILE)
+            except Exception as e:
+                print(f"Error refreshing credentials: {e}")
+                raise RuntimeError("Token refresh failed. Re-authentication required. Delete token.json and run quickstart.")
+        else:
+            raise RuntimeError(f"No valid credentials. Ensure a valid token.json exists at: {TOKEN_FILE} (run Google quickstart).")
+
+    # Build service and insert the task
+    try:
+        service = build("tasks", "v1", credentials=creds, cache_discovery=False)
+        task = {"title": task_title}
+        print(f"Connecting to Google Tasks API to create task: {task_title!r}")
+        result = service.tasks().insert(tasklist='@default', body=task).execute()
+        created_title = result.get("title", "<no-title>")
+        print(f"Successfully created task: {created_title!r}")
+        return True
+    except Exception as e:
+        print(f"Error creating task via Google Tasks API: {e}")
+        raise
+
+if __name__ == "__main__":
+    try:
+        create_google_task("Test run from googletrial.py")
+    except Exception as e:
+        print(f"Test run failed: {e}")
